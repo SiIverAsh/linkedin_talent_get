@@ -1,0 +1,17 @@
+.browser-profile/
+config/cookie*.json
+__pycache__/
+*.xlsx
+*.csv
+*.jsonl
+*.checkpoint.json
+*.shards.json
+
+.venv
+config/config.json
+config/search_criteria.json
+
+linkedin_talent/__init__.py
+linkedin_talent/__main__.py
+
+README.md
