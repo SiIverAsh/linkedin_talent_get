@@ -1,0 +1,34 @@
+{
+  "keywords": [
+    "Target Identification",
+    "Target Discovery",
+    "Target Validation",
+    "Disease Biology",
+    "Target Biology",
+    "Mechanism of Action",
+    "MoA",
+    "Hit Identification",
+    "Lead Optimization",
+    "Candidate Nomination",
+    "IND-Enabling Studies",
+    "Preclinical Development",
+    "Drug Discovery",
+    "TPP",
+    "lead discovery",
+    "lead identification"
+  ],
+  "degrees": [
+    "PhD",
+    "MD"
+  ],
+  "companies": [
+    {
+      "name": "AbbVie",
+      "aliases": ["AbbVie"]
+    },
+    {
+      "name": "AstraZeneca",
+      "aliases": ["AstraZeneca", "Astra Zaneca", "阿斯利康"]
+    }
+  ]
+}

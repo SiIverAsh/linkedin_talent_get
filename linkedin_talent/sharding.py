@@ -17,15 +17,19 @@ def shard_id(surnames: list[str]) -> str:
     return "surname:" + "|".join(item.casefold() for item in surnames)
 
 
-def reset_start(url: str) -> str:
+def set_start(url: str, start: int) -> str:
     parts = urlsplit(url)
     query = [
         (key, value)
         for key, value in parse_qsl(parts.query, keep_blank_values=True)
         if key != "start"
     ]
-    query.append(("start", "0"))
+    query.append(("start", str(max(0, start))))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+
+def reset_start(url: str) -> str:
+    return set_start(url, 0)
 
 
 def load_surnames(path: Path) -> list[str]:
@@ -59,7 +63,7 @@ def load_or_create_plan(
             raise ValueError("当前 --url 与已有分片计划不一致；请继续使用原 URL，或加 --fresh 新建计划")
         return plan
     return {
-        "version": 2,
+        "version": 3,
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "updated_at": "",
         "criteria": expected_criteria,
@@ -67,10 +71,12 @@ def load_or_create_plan(
         "pending": [surnames],
         "completed": [],
         "unresolved": [],
+        "active": None,
     }
 
 
 def persist_plan(path: Path, plan: dict[str, Any]) -> None:
+    plan["version"] = max(3, int(plan.get("version", 1)))
     plan["updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
     save_json(path, plan)
 

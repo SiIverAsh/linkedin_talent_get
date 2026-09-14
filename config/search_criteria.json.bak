@@ -1,0 +1,42 @@
+{
+  "keywords": [
+    "Target Identification",
+    "Target Discovery",
+    "Target Validation",
+    "Disease Biology",
+    "Target Biology",
+    "Mechanism of Action",
+    "MoA",
+    "Hit Identification",
+    "Lead Optimization",
+    "Candidate Nomination",
+    "IND-Enabling Studies",
+    "Preclinical Development",
+    "Drug Discovery",
+    "TPP",
+    "lead discovery",
+    "lead identification"
+  ],
+  "degrees": [
+    "PhD",
+    "MD"
+  ],
+  "companies": [
+    {
+      "name": "AstraZeneca",
+      "aliases": ["AstraZeneca"]
+    },
+    {
+      "name": "BMS",
+      "aliases": ["BMS", "Bristol Myers Squibb", "Bristol-Myers Squibb"]
+    },
+    {
+      "name": "AbbVie",
+      "aliases": ["AbbVie"]
+    },
+    {
+      "name": "Genentech (Roche)",
+      "aliases": ["Genentech", "Roche"]
+    }
+  ]
+}
