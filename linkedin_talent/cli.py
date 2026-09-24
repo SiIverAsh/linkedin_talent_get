@@ -38,7 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, help="输出路径（支持 .csv 和 .xlsx）")
     parser.add_argument("--profile-dir", type=Path, default=Path(".browser-profile"), help="浏览器用户目录")
     parser.add_argument("--max-pages", type=int, default=40, help="最多采集页数（默认 40）")
-    parser.add_argument("--max-candidates", type=int, default=10000, help="最多采集人数（默认 10000）")
+    parser.add_argument(
+        "--max-candidates",
+        type=int,
+        default=None,
+        help="最多采集人数（默认不设上限，处理完所有姓氏分片）",
+    )
     parser.add_argument("--max-per-shard", type=int, default=900, help="姓氏分片安全阈值（默认 900）")
     parser.add_argument(
         "--surnames",
@@ -49,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plan", type=Path, help="姓氏分片计划及进度文件")
     parser.add_argument("--no-surname-sharding", action="store_true", help="禁用逐个姓氏的自动分片")
     parser.add_argument("--no-details", action="store_true", help="不打开详情抽屉，仅采集搜索结果卡片")
+    parser.add_argument("--no-expand-details", action="store_true", help="打开详情抽屉但不点击显示全部或滚动展开")
+    parser.add_argument("--partial-marker", type=Path, help="部分详情候选人的本地标记 JSONL 文件")
     parser.add_argument("--headed", action="store_true", help="显示浏览器窗口（默认无头运行）")
     parser.add_argument(
         "--cookies",
@@ -66,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
 def validate_args(args: argparse.Namespace) -> None:
     if args.max_pages < 1:
         raise ValueError("--max-pages 必须大于 0")
-    if args.max_candidates < 1:
+    if args.max_candidates is not None and args.max_candidates < 1:
         raise ValueError("--max-candidates 必须大于 0")
     if not 1 <= args.max_per_shard <= 1000:
         raise ValueError("--max-per-shard 必须在 1 到 1000 之间")
@@ -165,13 +172,17 @@ def run(args: argparse.Namespace) -> int:
                     max_pages=args.max_pages,
                     max_candidates=args.max_candidates,
                     no_details=args.no_details,
+                    expand_details=not args.no_expand_details,
+                    partial_marker=args.partial_marker,
+                    split_oversized=not getattr(args, "all_remaining_surnames", False),
+                    surname_separator=" OR " if getattr(args, "all_remaining_surnames", False) else ", ",
                 )
                 unresolved = len(plan.get("unresolved", []))
                 if unresolved:
                     print(f"仍有 {unresolved} 个超限单姓分片，详见计划文件。")
 
             while not used_sharding and completed_pages < args.max_pages:
-                if len(records) >= args.max_candidates:
+                if args.max_candidates is not None and len(records) >= args.max_candidates:
                     break
                 page_number = completed_pages + 1
                 print(f"\n第 {page_number} 页：加载候选人卡片……")
@@ -185,16 +196,21 @@ def run(args: argparse.Namespace) -> int:
                     key = normalize_url(candidate.recruiter_url)
                     if key in seen:
                         continue
-                    if len(records) >= args.max_candidates:
+                    if args.max_candidates is not None and len(records) >= args.max_candidates:
                         break
 
                     ordinal = len(records) + 1
-                    print(f"  [{ordinal}/{args.max_candidates}] {candidate.name}")
+                    limit_label = args.max_candidates if args.max_candidates is not None else "∞"
+                    print(f"  [{ordinal}/{limit_label}] {candidate.name}")
                     if not args.no_details:
                         last_error = ""
                         for attempt in range(1, 3):
                             try:
-                                capture_candidate_detail(page, candidate)
+                                capture_candidate_detail(
+                                    page,
+                                    candidate,
+                                    expand_details=not args.no_expand_details,
+                                )
                                 last_error = ""
                                 break
                             except Exception as error:
@@ -219,7 +235,9 @@ def run(args: argparse.Namespace) -> int:
                 save_checkpoint(checkpoint, records, completed_pages, page.url)
                 print(f"第 {page_number} 页完成：新增 {new_on_page} 人，累计 {len(records)} 人")
 
-                if len(records) >= args.max_candidates or completed_pages >= args.max_pages:
+                if (
+                    args.max_candidates is not None and len(records) >= args.max_candidates
+                ) or completed_pages >= args.max_pages:
                     break
                 if not advance_to_next_page(page, completed_pages):
                     print("没有可用的下一页，采集结束。")

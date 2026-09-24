@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from .models import Candidate
 
 _JsonlState = tuple[int, int, str]
 _jsonl_states: dict[Path, _JsonlState] = {}
+_jsonl_redirects: dict[Path, Path] = {}
 
 
 def _now() -> str:
@@ -26,6 +28,14 @@ def resolve_checkpoint_paths(output: Path, requested: Path | None) -> tuple[Path
         return target, source
 
     target = output.with_suffix(".checkpoint.jsonl").resolve()
+    recovery_files = sorted(
+        target.parent.glob(f"{target.stem}.recovery-*{target.suffix}"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    if recovery_files:
+        target = recovery_files[0]
+        return target, target
     legacy = output.with_suffix(".checkpoint.json").resolve()
     source = target if target.exists() or not legacy.exists() else legacy
     return target, source
@@ -98,6 +108,8 @@ def save_checkpoint(
         return
 
     path = path.resolve()
+    requested_path = path
+    path = _jsonl_redirects.get(path, path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path not in _jsonl_states:
         if path.exists():
@@ -128,9 +140,30 @@ def save_checkpoint(
             "page_url": page_url,
         })
     if events:
-        with path.open("a", encoding="utf-8", newline="") as stream:
-            for event in events:
-                stream.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+        last_error: PermissionError | None = None
+        for attempt in range(1, 6):
+            try:
+                with path.open("a", encoding="utf-8", newline="") as stream:
+                    for event in events:
+                        stream.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+                last_error = None
+                break
+            except PermissionError as error:
+                last_error = error
+                if attempt < 5:
+                    time.sleep(0.5)
+        if last_error is not None:
+            if path == requested_path:
+                recovery = path.with_name(
+                    f"{path.stem}.recovery-{datetime.now():%Y%m%d_%H%M%S}{path.suffix}"
+                )
+                _jsonl_redirects[requested_path] = recovery
+                _jsonl_states[recovery] = (0, -1, "")
+                print(f"[warn] checkpoint 拒绝写入，改用新断点文件：{recovery}")
+                return save_checkpoint(requested_path, records, completed_pages, page_url)
+            raise PermissionError(
+                f"无法写入新断点文件：{path}。请确认目标目录具有写入权限。"
+            ) from last_error
 
     _jsonl_states[path] = (len(records), completed_pages, page_url)
 

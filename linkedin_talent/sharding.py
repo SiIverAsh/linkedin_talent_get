@@ -83,10 +83,11 @@ def persist_plan(path: Path, plan: dict[str, Any]) -> None:
 
 def parse_human_count(text: str) -> int | None:
     normalized = clean_text(text).replace(",", "")
+    number = r"(?:\d+(?:\.\d+)?|\.\d+)"
     patterns = [
-        r"(?:about\s+)?([\d.]+)\s*([KM])?\s*(\+)?\s*(?:results?|candidates?)",
-        r"共\s*([\d.]+)\s*([万千])?\s*(\+)?\s*(?:条|位|个)?(?:结果|候选人|人)",
-        r"([\d.]+)\s*([万千])?\s*(\+)?\s*(?:条)?结果",
+        rf"(?:about\s+)?({number})\s*([KM])?\s*(\+)?\s*(?:results?|candidates?)",
+        rf"共\s*({number})\s*([万千])?\s*(\+)?\s*(?:条|位|个)?(?:结果|候选人|人)",
+        rf"({number})\s*([万千])?\s*(\+)?\s*(?:条)?结果",
     ]
     for pattern in patterns:
         match = re.search(pattern, normalized, re.I)

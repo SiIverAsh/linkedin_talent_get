@@ -15,6 +15,7 @@ class ShardingPrimitivesTest(unittest.TestCase):
     def test_count_parsing_and_split(self) -> None:
         self.assertEqual(parse_human_count("About 1,000+ results"), 1001)
         self.assertEqual(parse_human_count("共 1.2 万位候选人"), 12000)
+        self.assertIsNone(parse_human_count("About . results"))
         self.assertEqual(split_group(["Ai", "An", "Ao", "Ba"]), (["Ai", "An"], ["Ao", "Ba"]))
 
     def test_auto_mode_threshold_and_resume(self) -> None:

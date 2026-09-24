@@ -368,7 +368,11 @@ def find_candidate_link(page: Page, recruiter_url: str) -> Locator | None:
     return None
 
 
-def capture_candidate_detail(page: Page, candidate: Candidate) -> None:
+def capture_candidate_detail(
+    page: Page,
+    candidate: Candidate,
+    expand_details: bool = True,
+) -> None:
     if not close_drawer(page):
         raise RuntimeError("无法关闭之前打开的详情抽屉")
     link = find_candidate_link(page, candidate.recruiter_url)
@@ -385,14 +389,21 @@ def capture_candidate_detail(page: Page, candidate: Candidate) -> None:
     drawer.wait_for(state="visible", timeout=12_000)
     if not wait_for_drawer_stable(drawer):
         raise RuntimeError("详情内容未稳定加载")
-    load_full_drawer(drawer)
+    if expand_details:
+        load_full_drawer(drawer)
     detail = extract_drawer_detail(drawer)
 
     candidate.public_url = normalize_public_url(detail.get("public_url", ""))
     candidate.headline = clean_text(detail.get("headline")) or candidate.headline
-    candidate.positions = [Position(**item) for item in detail.get("positions", [])]
-    candidate.education = [Education(**item) for item in detail.get("education", [])]
-    candidate.languages = [Language(**item) for item in detail.get("languages", [])]
+    detail_positions = [Position(**item) for item in detail.get("positions", [])]
+    detail_education = [Education(**item) for item in detail.get("education", [])]
+    detail_languages = [Language(**item) for item in detail.get("languages", [])]
+    if detail_positions:
+        candidate.positions = detail_positions
+    if detail_education:
+        candidate.education = detail_education
+    if detail_languages:
+        candidate.languages = detail_languages
     candidate.open_to_work = unique_texts(detail.get("open_to_work", []))
     detail_skills = split_skills(detail.get("skills", []))
     candidate.core_skills = detail_skills or candidate.core_skills

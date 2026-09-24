@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import time
@@ -258,9 +259,10 @@ def surname_filter_is_applied(page: Page, surname: str) -> bool:
     return bool(re.search(rf"(?<!\w){re.escape(surname)}(?!\w)", locator_text(facet), re.I))
 
 
-def apply_surname_group(page: Page, surnames: list[str]) -> None:
-    if len(surnames) != 1:
-        raise ValueError(f"每个分片必须只包含一个姓氏，当前包含 {len(surnames)} 个")
+def apply_surname_group(page: Page, surnames: list[str], separator: str = ", ") -> None:
+    surnames = [clean_text(surname) for surname in surnames if clean_text(surname)]
+    if not surnames:
+        raise ValueError("姓氏分片不能为空")
     if wait_for_surname_facet(page) is None:
         raise RuntimeError("Recruiter 筛选栏加载超时，未找到 Last name(s) / 姓氏筛选器")
     surname_input = find_surname_input(page)
@@ -279,18 +281,18 @@ def apply_surname_group(page: Page, surnames: list[str]) -> None:
         surname_input = find_surname_input(page)
     if surname_input is None:
         raise RuntimeError("找不到 Recruiter 的 Last name(s) / 姓氏输入框")
-    surname = surnames[0]
-    print(f"  替换姓氏筛选：{surname}")
-    surname_input.fill(surname, timeout=5_000)
-    if clean_text(surname_input.input_value()) != surname:
-        raise RuntimeError(f"姓氏输入失败：输入框当前值不是 {surname}")
+    query = separator.join(surnames)
+    print(f"  一次性输入 {len(surnames)} 个姓氏：{query}")
+    surname_input.fill(query, timeout=5_000)
+    if clean_text(surname_input.input_value()) != query:
+        raise RuntimeError(f"姓氏输入失败：输入框当前值不是 {query}")
     trigger_search(page, surname_input)
     check_access_page(page)
     for _ in range(20):
-        if surname_filter_is_applied(page, surname):
+        if all(surname_filter_is_applied(page, surname) for surname in surnames):
             return
         time.sleep(0.5)
-    raise RuntimeError(f"姓氏筛选未生效：页面未确认已应用 {surname}，为避免误抓已停止")
+    raise RuntimeError(f"姓氏筛选未生效：页面未确认已应用 {query}，为避免误抓已停止")
 
 
 def read_result_count(page: Page) -> int:
@@ -346,11 +348,11 @@ def _active_checkpoint(
     }
 
 
-def _capture_detail(page: Page, candidate: Candidate) -> None:
+def _capture_detail(page: Page, candidate: Candidate, expand_details: bool = True) -> None:
     last_error = ""
     for attempt in range(1, 3):
         try:
-            capture_candidate_detail(page, candidate)
+            capture_candidate_detail(page, candidate, expand_details=expand_details)
             candidate.detail_error = ""
             return
         except Exception as error:
@@ -360,6 +362,38 @@ def _capture_detail(page: Page, candidate: Candidate) -> None:
                 short_delay(1, 1.8)
     candidate.detail_error = last_error
     print(f"      [warn] 详情未获取：{last_error}")
+
+
+def _load_partial_names(path: Path | None) -> set[str]:
+    if path is None or not path.exists():
+        return set()
+    names: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if item.get("status") == "partial" and item.get("name"):
+            names.add(str(item["name"]))
+    return names
+
+
+def _save_partial_name(
+    path: Path | None,
+    name: str,
+    recruiter_url: str,
+    saved_names: set[str],
+) -> None:
+    if path is None or not name or name in saved_names:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({
+            "name": name,
+            "recruiter_url": recruiter_url,
+            "status": "partial",
+        }, ensure_ascii=False) + "\n")
+    saved_names.add(name)
 
 
 def _scrape_shard(
@@ -373,8 +407,10 @@ def _scrape_shard(
     group_key: str,
     start_page: int,
     max_pages: int,
-    max_candidates: int,
+    max_candidates: int | None,
     no_details: bool,
+    expand_details: bool = True,
+    partial_marker: Path | None = None,
 ) -> tuple[int, int, bool]:
     if result_count == 0:
         return 0, 0, True
@@ -383,27 +419,36 @@ def _scrape_shard(
     expected_pages = _total_pages(result_count, max_pages)
     before_total = len(records)
     pages_done = 0
+    partial_names = _load_partial_names(partial_marker)
 
     for page_index in range(start_page, expected_pages + 1):
         check_access_page(page)
         loaded = scroll_results(page)
         candidates = extract_card_candidates(page)
-        print(f"    第 {page_index}/{expected_pages} 页：{loaded} 个链接，{len(candidates)} 位候选人")
+        if expand_details:
+            print(f"    第 {page_index}/{expected_pages} 页：{loaded} 个链接，{len(candidates)} 位候选人")
 
         for candidate in candidates:
             url_key = normalize_url(candidate.recruiter_url)
             person_key = _candidate_key(candidate)
             if url_key in seen_urls or (person_key is not None and person_key in seen_people):
                 continue
-            if len(records) >= max_candidates:
+            if max_candidates is not None and len(records) >= max_candidates:
                 return len(records) - before_total, pages_done, False
             if not no_details:
-                _capture_detail(page, candidate)
+                _capture_detail(page, candidate, expand_details=expand_details)
             detailed_key = _candidate_key(candidate)
             if detailed_key is not None and detailed_key in seen_people:
                 continue
 
             records.append(candidate)
+            if not expand_details:
+                _save_partial_name(
+                    partial_marker,
+                    candidate.name,
+                    candidate.recruiter_url,
+                    partial_names,
+                )
             if url_key:
                 seen_urls.add(url_key)
             if detailed_key is not None:
@@ -437,8 +482,12 @@ def run_surname_shards(
     plan_path: Path,
     max_per_shard: int,
     max_pages: int,
-    max_candidates: int,
+    max_candidates: int | None,
     no_details: bool,
+    expand_details: bool = True,
+    partial_marker: Path | None = None,
+    split_oversized: bool = True,
+    surname_separator: str = ", ",
 ) -> None:
     """Evaluate pending groups, recursively split oversized groups, and scrape safe ones."""
     plan["settings"] = {
@@ -448,9 +497,11 @@ def run_surname_shards(
     }
     persist_plan(plan_path, plan)
 
-    while plan["pending"] and len(records) < max_candidates:
+    while plan["pending"] and (
+        max_candidates is None or len(records) < max_candidates
+    ):
         group = list(plan["pending"][0])
-        if len(group) > 1:
+        if len(group) > 1 and split_oversized:
             plan["pending"][:1] = [[surname] for surname in group]
             persist_plan(plan_path, plan)
             continue
@@ -482,12 +533,12 @@ def run_surname_shards(
                 f"{active['surname_count']} 个姓氏，{result_count} 条结果"
             )
         else:
-            apply_surname_group(page, group)
+            apply_surname_group(page, group, separator=surname_separator)
             result_count = read_result_count(page)
             print(f"  LinkedIn 显示结果数：{result_count}")
 
             if result_count > max_per_shard:
-                if len(group) > 1:
+                if len(group) > 1 and split_oversized:
                     left, right = split_group(group)
                     plan["pending"][:1] = [left, right]
                     print(f"  超过 {max_per_shard}，拆成 {len(left)} + {len(right)} 个姓氏")
@@ -496,6 +547,8 @@ def run_surname_shards(
 
             start_page = 1
             total_pages = _total_pages(result_count, max_pages)
+            if not split_oversized:
+                total_pages = min(max_pages, max(total_pages, math.ceil(result_count / 10)))
             if result_count > max_per_shard and len(group) == 1:
                 print(f"  [single-surname] {group[0]} 有 {result_count} 人，将抓取全部 {total_pages} 页")
             plan["active"] = _active_checkpoint(
@@ -512,9 +565,10 @@ def run_surname_shards(
         added, pages, complete = _scrape_shard(
             page, result_count, records, output, checkpoint, plan, plan_path,
             group_key, start_page, max_pages, max_candidates, no_details,
+            expand_details, partial_marker,
         )
         if not complete:
-            if len(records) >= max_candidates:
+            if max_candidates is not None and len(records) >= max_candidates:
                 print(f"  已达到候选人上限 {max_candidates}，当前页断点已保存。")
             else:
                 print("  未能进入下一页；当前页断点已保存，下次将从该页继续")
